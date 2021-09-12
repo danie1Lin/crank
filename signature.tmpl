@@ -1,0 +1,17 @@
+package {{.Module}}
+
+import (
+	"github.com/RichardKnop/machinery/v1/tasks"
+)
+
+func New{{.Name}}Signature({{range $i, $v := .Params}}{{if ne $i 0}}{{", "}}{{end}}{{printf "%s %s" $v.Name $v.Type}}{{end}}) *tasks.Signature {
+	args := []tasks.Arg{
+		{{- range .Params}}
+		{Type: "{{.Type}}", Value: {{.Name}}},
+		{{- end}}
+	}
+	return &tasks.Signature{
+		Name: "{{.Name}}",
+		Args: args,
+	}
+}

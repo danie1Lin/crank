@@ -16,6 +16,7 @@ limitations under the License.
 package cmd
 
 import (
+	"io"
 	"path/filepath"
 	"text/template"
 
@@ -44,13 +45,25 @@ type Task struct {
 // signatureCmd represents the signature command
 var signatureCmd = &cobra.Command{
 	Use:   "signature",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "generate a function to New Signature of task",
+	Long: `generate a function to New Signature of task. For example:
+Your Task definition is
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+TaskAdd(ctx context.Context, a, b int) 
+
+will generate
+
+func NewTaskAddSignature(a int, b int) *tasks.Signature {
+        args := []tasks.Arg{
+                {Type: "int", Value: a},
+                {Type: "int", Value: b},
+        }
+        return &tasks.Signature{
+                Name: "TaskAdd",
+                Args: args,
+        }
+}
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		targetPkg, err := cmd.Flags().GetString("pkg")
 		if err != nil {
@@ -95,9 +108,13 @@ func get(pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
 		panic(err)
 	}
 	for _, taskDef := range tasks {
-		task := pkg.Scope().Lookup(taskDef)
-		fn, _, _ := types.LookupFieldOrMethod(task.Type(), true, pkg, "Do")
-		switch t := fn.(type) {
+		taskObj := pkg.Scope().Lookup(taskDef)
+		_, ok := taskObj.(*types.Func)
+		if !ok {
+			taskObj, _, _ = types.LookupFieldOrMethod(taskObj.Type(), true, pkg, "Do")
+		}
+		var task Task
+		switch t := taskObj.(type) {
 		case *types.Func:
 			typ := t.Type().(*types.Signature)
 
@@ -109,23 +126,31 @@ func get(pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
 			if firstParam := typ.Params().At(0); firstParam.Type().String() != "context.Context" { //TODO: check by using types.Type
 				break
 			}
-
 			for i := 0; i < typ.Results().Len(); i++ {
-				log.Info(typ.Results().At(i).Type())
+				log.Debug(typ.Results().At(i).Type())
 			}
-			tmpl, err := template.ParseFiles("signature.tmpl")
-			if err != nil {
-				panic(err)
-			}
-			err = tmpl.Execute(os.Stdout, Task{
+			task = Task{
 				Module: pkgName,
 				Name:   taskDef,
 				Params: vars,
-			})
-			if err != nil {
-				panic(err)
 			}
 		}
+		f, err := os.OpenFile(filepath.Join(pkgName, taskDef+"_sig.go"), os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			panic(err)
+		}
+		GenerateSignatureFunctionCode(f, task)
+	}
+}
+
+func GenerateSignatureFunctionCode(writer io.Writer, task Task) {
+	tmpl, err := template.ParseFiles("signature.tmpl")
+	if err != nil {
+		panic(err)
+	}
+	err = tmpl.Execute(writer, task)
+	if err != nil {
+		panic(err)
 	}
 }
 
@@ -133,13 +158,4 @@ func init() {
 	rootCmd.AddCommand(signatureCmd)
 	signatureCmd.Flags().StringP("pkg", "p", "", "the package your task resides")
 	signatureCmd.Flags().StringP("file", "f", "", "the file your task resides")
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// signatureCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// signatureCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

@@ -2,6 +2,7 @@ package tasks
 
 import "context"
 
+//go:generate crank signature TaskAdd -p tasks  -f tasks/add.go
 // TaskAdd adding two number
 type TaskAdd struct {
 }
