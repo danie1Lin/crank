@@ -16,7 +16,8 @@ limitations under the License.
 package cmd
 
 import (
-	"fmt"
+	"path/filepath"
+	"text/template"
 
 	"github.com/spf13/cobra"
 
@@ -29,6 +30,16 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
+
+type Var struct {
+	Name string
+	Type string
+}
+type Task struct {
+	Module string
+	Name   string
+	Params []Var
+}
 
 // signatureCmd represents the signature command
 var signatureCmd = &cobra.Command{
@@ -54,6 +65,7 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			panic(err)
 		}
+		dir = filepath.Join(dir, filepath.Dir(targetFile))
 
 		fset := token.NewFileSet()
 		pkgs, err := parser.ParseDir(fset, dir, nil, parser.AllErrors|parser.ParseComments)
@@ -62,23 +74,23 @@ to quickly create a Cobra application.`,
 		}
 		for pkgName, pkg := range pkgs {
 			if pkgName != targetPkg {
+				log.Info("skip pkg: ", pkgName)
 				continue
 			}
 			for filename, file := range pkg.Files {
-				if filename != targetFile {
+				if filepath.Base(filename) != filepath.Base(targetFile) {
+					log.Info("skip file", filename)
 					continue
 				}
-				get(file, args...)
+				get(pkgName, fset, file, args...)
 			}
-
 		}
 	},
 }
 
-func get(f *ast.File, tasks ...string) {
-	fset := token.NewFileSet()
+func get(pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
 	conf := types.Config{Importer: importer.Default()}
-	pkg, err := conf.Check("tasks", fset, []*ast.File{f}, nil)
+	pkg, err := conf.Check(".", fset, []*ast.File{f}, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -88,15 +100,30 @@ func get(f *ast.File, tasks ...string) {
 		switch t := fn.(type) {
 		case *types.Func:
 			typ := t.Type().(*types.Signature)
-			for i := 0; i < typ.Params().Len(); i++ {
-				fmt.Println(typ.Params().At(i))
+
+			vars := []Var{}
+			for i := 1; i < typ.Params().Len(); i++ {
+				param := typ.Params().At(i)
+				vars = append(vars, Var{Name: param.Name(), Type: param.Type().String()})
 			}
 			if firstParam := typ.Params().At(0); firstParam.Type().String() != "context.Context" { //TODO: check by using types.Type
 				break
 			}
 
 			for i := 0; i < typ.Results().Len(); i++ {
-				log.Info(typ.Results().At(i))
+				log.Info(typ.Results().At(i).Type())
+			}
+			tmpl, err := template.ParseFiles("signature.tmpl")
+			if err != nil {
+				panic(err)
+			}
+			err = tmpl.Execute(os.Stdout, Task{
+				Module: pkgName,
+				Name:   taskDef,
+				Params: vars,
+			})
+			if err != nil {
+				panic(err)
 			}
 		}
 	}
