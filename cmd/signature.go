@@ -104,62 +104,87 @@ func NewTaskAddSignature(a int, b int) *tasks.Signature {
 	},
 }
 
-func GenerateTaskSignature(path, pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
+func getPkgTypes(fileAst *ast.File, fset *token.FileSet) (*types.Package, error) {
 	conf := types.Config{Importer: importer.Default()}
-	pkg, err := conf.Check(".", fset, []*ast.File{f}, nil)
+	return conf.Check(".", fset, []*ast.File{fileAst}, nil)
+}
+
+func NewTask(pkg *types.Package, taskName string) (Task, error) {
+	taskObj := pkg.Scope().Lookup(taskName)
+	_, ok := taskObj.(*types.Func)
+	if !ok {
+		taskObj, _, _ = types.LookupFieldOrMethod(taskObj.Type(), true, pkg, "Do")
+	}
+	var task Task
+	switch t := taskObj.(type) {
+	case *types.Func:
+		typ := t.Type().(*types.Signature)
+
+		vars := []Var{}
+		for i := 1; i < typ.Params().Len(); i++ {
+			param := typ.Params().At(i)
+			vars = append(vars, Var{Name: param.Name(), Type: param.Type().String()})
+		}
+		if firstParam := typ.Params().At(0); firstParam.Type().String() != "context.Context" { //TODO: check by using types.Type
+			break
+		}
+		for i := 0; i < typ.Results().Len(); i++ {
+			log.Debug(typ.Results().At(i).Type())
+		}
+		task = Task{
+			Module: pkg.Name(),
+			Name:   taskName,
+			Params: vars,
+		}
+	}
+	return task, nil
+}
+
+func GenerateTaskSignature(path, pkgName string, fset *token.FileSet, f *ast.File, taskNames ...string) {
+	pkg, err := getPkgTypes(f, fset)
 	if err != nil {
 		panic(err)
 	}
-	for _, taskDef := range tasks {
-		taskObj := pkg.Scope().Lookup(taskDef)
-		_, ok := taskObj.(*types.Func)
-		if !ok {
-			taskObj, _, _ = types.LookupFieldOrMethod(taskObj.Type(), true, pkg, "Do")
-		}
-		var task Task
-		switch t := taskObj.(type) {
-		case *types.Func:
-			typ := t.Type().(*types.Signature)
 
-			vars := []Var{}
-			for i := 1; i < typ.Params().Len(); i++ {
-				param := typ.Params().At(i)
-				vars = append(vars, Var{Name: param.Name(), Type: param.Type().String()})
-			}
-			if firstParam := typ.Params().At(0); firstParam.Type().String() != "context.Context" { //TODO: check by using types.Type
-				break
-			}
-			for i := 0; i < typ.Results().Len(); i++ {
-				log.Debug(typ.Results().At(i).Type())
-			}
-			task = Task{
-				Module: pkgName,
-				Name:   taskDef,
-				Params: vars,
-			}
+	for _, taskName := range taskNames {
+		task, err := NewTask(pkg, taskName)
+		if err != nil {
+			panic(err)
 		}
+
 		var code strings.Builder
 		err = WriteTaskSignature(&code, task)
 		if err != nil {
 			panic(err)
 		}
-		f, err := os.OpenFile(filepath.Join(path, strcase.ToSnake(taskDef)+"_signature.go"), os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			panic(err)
-		}
-		_, err = f.WriteString(code.String())
+
+		err = writeTaskToFile(task, strcase.ToSnake(taskName)+"_signature.go")
 		if err != nil {
 			panic(err)
 		}
 	}
 }
 
-func WriteTaskSignature(writer io.Writer, task Task) error {
-	tmpl, err := template.ParseFS(TmplFiles, "template/signature.tmpl")
+func writeTaskToFile(task Task, filename string) error {
+	var code strings.Builder
+	err := WriteTaskSignature(&code, task)
 	if err != nil {
 		return err
 	}
-	err = tmpl.Execute(writer, task)
+	f, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(code.String())
+	return err
+}
+
+func WriteTaskSignature(writer io.Writer, task Task) error {
+	SignatureTmpl, err := template.ParseFS(TmplFiles, "template/signature.tmpl")
+	if err != nil {
+		return err
+	}
+	err = SignatureTmpl.Execute(writer, task)
 	if err != nil {
 		return err
 	}
