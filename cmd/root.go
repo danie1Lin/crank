@@ -16,13 +16,16 @@ limitations under the License.
 package cmd
 
 import (
+	"embed"
 	"fmt"
 	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/spf13/viper"
 )
 
+var TmplFiles embed.FS
 var cfgFile string
 
 // rootCmd represents the base command when called without any subcommands

@@ -18,6 +18,7 @@ package cmd
 import (
 	"io"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,8 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+
+	"github.com/iancoleman/strcase"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -95,13 +98,13 @@ func NewTaskAddSignature(a int, b int) *tasks.Signature {
 					log.Info("skip file", filename)
 					continue
 				}
-				get(pkgName, fset, file, args...)
+				GenerateTaskSignature(dir, pkgName, fset, file, args...)
 			}
 		}
 	},
 }
 
-func get(pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
+func GenerateTaskSignature(path, pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
 	conf := types.Config{Importer: importer.Default()}
 	pkg, err := conf.Check(".", fset, []*ast.File{f}, nil)
 	if err != nil {
@@ -135,27 +138,37 @@ func get(pkgName string, fset *token.FileSet, f *ast.File, tasks ...string) {
 				Params: vars,
 			}
 		}
-		f, err := os.OpenFile(filepath.Join(pkgName, taskDef+"_sig.go"), os.O_RDWR|os.O_CREATE, 0644)
+		var code strings.Builder
+		err = WriteTaskSignature(&code, task)
 		if err != nil {
 			panic(err)
 		}
-		GenerateSignatureFunctionCode(f, task)
+		f, err := os.OpenFile(filepath.Join(path, strcase.ToSnake(taskDef)+"_signature.go"), os.O_RDWR|os.O_CREATE, 0644)
+		if err != nil {
+			panic(err)
+		}
+		_, err = f.WriteString(code.String())
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
-func GenerateSignatureFunctionCode(writer io.Writer, task Task) {
-	tmpl, err := template.ParseFiles("signature.tmpl")
+func WriteTaskSignature(writer io.Writer, task Task) error {
+	tmpl, err := template.ParseFS(TmplFiles, "template/signature.tmpl")
 	if err != nil {
-		panic(err)
+		return err
 	}
 	err = tmpl.Execute(writer, task)
 	if err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
 func init() {
 	rootCmd.AddCommand(signatureCmd)
 	signatureCmd.Flags().StringP("pkg", "p", "", "the package your task resides")
 	signatureCmd.Flags().StringP("file", "f", "", "the file your task resides")
+	signatureCmd.Flags().StringP("out", "o", "", "the output target")
 }

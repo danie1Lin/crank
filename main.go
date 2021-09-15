@@ -15,8 +15,16 @@ limitations under the License.
 */
 package main
 
-import "github.com/danie1Lin/crank/cmd"
+import (
+	"embed"
+
+	"github.com/danie1Lin/crank/cmd"
+)
+
+//go:embed template
+var embedFs embed.FS
 
 func main() {
+	cmd.TmplFiles = embedFs
 	cmd.Execute()
 }
